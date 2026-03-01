@@ -1,7 +1,9 @@
 #ifndef NUKLEAR_DEFAULT_H_INCLUDED
 #define NUKLEAR_DEFAULT_H_INCLUDED
 
-enum nk_theme
+struct nk_color;
+
+typedef enum nk_theme
 {
 	nk_theme_black,
 	nk_theme_white,
@@ -13,7 +15,7 @@ enum nk_theme
 	nk_theme_catppuccin_frappe,
 	nk_theme_catppuccin_macchiato,
 	nk_theme_catppuccin_mocha
-};
+} nk_theme;
 
 // trigger on release maybe nice?
 //#define NK_BUTTON_TRIGGER_ON_RELEASE

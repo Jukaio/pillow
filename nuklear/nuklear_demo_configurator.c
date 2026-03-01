@@ -33,13 +33,14 @@ style_rgb(struct nk_context* ctx, const char* name, struct nk_color* color)
 	nk_label(ctx, name, NK_TEXT_LEFT);
 	if (nk_combo_begin_color(ctx, *color, nk_vec2(nk_widget_width(ctx), 400))) {
 		nk_layout_row_dynamic(ctx, 120, 1);
-		colorf = nk_color_picker(ctx, nk_color_cf(*color), NK_RGB);
+		colorf = nk_color_picker(ctx, nk_color_cf(*color), NK_RGBA);
 		nk_layout_row_dynamic(ctx, 25, 1);
 		colorf.r = nk_propertyf(ctx, "#R:", 0, colorf.r, 1.0f, 0.01f, 0.005f);
 		colorf.g = nk_propertyf(ctx, "#G:", 0, colorf.g, 1.0f, 0.01f, 0.005f);
 		colorf.b = nk_propertyf(ctx, "#B:", 0, colorf.b, 1.0f, 0.01f, 0.005f);
+		colorf.a = nk_propertyf(ctx, "#A:", 0, colorf.a, 1.0f, 0.01f, 0.005f);
 
-		*color = nk_rgb_cf(colorf);
+		*color = nk_rgba_cf(colorf);
 
 		nk_combo_end(ctx);
 		return 1;
@@ -632,8 +633,8 @@ style_window_header(struct nk_context* ctx, struct nk_style_window_header* out_s
 	*out_style = header;
 }
 
-static void
-style_window(struct nk_context* ctx, struct nk_style_window* out_style)
+
+static void style_window(struct nk_context* ctx, struct nk_style_window* out_style)
 {
 	struct nk_style_window win = *out_style;
 
@@ -684,8 +685,10 @@ style_window(struct nk_context* ctx, struct nk_style_window* out_style)
 	*out_style = win;
 }
 
-int nk_demo_configurator(struct nk_context* ctx, struct nk_color color_table[NK_COLOR_COUNT])
+int nk_demo_configurator(struct nk_context* ctx)
 {
+	static struct nk_color color_table[NK_COLOR_COUNT];
+
 	/* window flags */
 	int border = nk_true;
 	int resize = nk_true;

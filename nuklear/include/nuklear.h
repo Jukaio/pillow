@@ -1514,7 +1514,8 @@ extern "C" {
         NK_WINDOW_SCROLL_AUTO_HIDE = NK_FLAG(7),
         NK_WINDOW_BACKGROUND = NK_FLAG(8),
         NK_WINDOW_SCALE_LEFT = NK_FLAG(9),
-        NK_WINDOW_NO_INPUT = NK_FLAG(10)
+        NK_WINDOW_NO_INPUT = NK_FLAG(10),
+        NK_WINDOW_PASSTHROUGH = NK_FLAG(11)
     };
 
     /**
@@ -4885,7 +4886,7 @@ extern "C" {
     NK_API void nk_push_custom(struct nk_command_buffer*, struct nk_rect, nk_command_custom_callback, nk_handle usr);
 
     /* ===============================================================
-     *
+     *`
      *                          INPUT
      *
      * ===============================================================*/
@@ -5615,7 +5616,7 @@ extern "C" {
         NK_PANEL_CONTEXTUAL = NK_FLAG(4),
         NK_PANEL_COMBO = NK_FLAG(5),
         NK_PANEL_MENU = NK_FLAG(6),
-        NK_PANEL_TOOLTIP = NK_FLAG(7)
+        NK_PANEL_TOOLTIP = NK_FLAG(7),
     };
     enum nk_panel_set {
         NK_PANEL_SET_NONBLOCK = NK_PANEL_CONTEXTUAL | NK_PANEL_COMBO | NK_PANEL_MENU | NK_PANEL_TOOLTIP,
@@ -20845,6 +20846,7 @@ nk_begin_titled(struct nk_context* ctx, const char* name, const char* title,
     NK_ASSERT(title);
     NK_ASSERT(ctx->style.font && ctx->style.font->width && "if this triggers you forgot to add a font");
     NK_ASSERT(!ctx->current && "if this triggers you missed a `nk_end` call");
+    NK_ASSERT(!(flags & NK_WINDOW_PASSTHROUGH) && "Windows cannot be passthrough - Not implemented, only popups!");
     if (!ctx || ctx->current || !title || !name)
         return 0;
 
@@ -21442,6 +21444,9 @@ nk_popup_begin(struct nk_context* ctx, enum nk_popup_type type,
     popup->layout = (struct nk_panel*)nk_create_panel(ctx);
     popup->flags = flags;
     popup->flags |= NK_WINDOW_BORDER;
+    /* TODO: This needs to get fixed so the passthrough control is coherent with the rest of the APIs here!*/
+    popup->flags = popup->flags & (~NK_WINDOW_PASSTHROUGH);
+
     if (type == NK_POPUP_DYNAMIC)
         popup->flags |= NK_WINDOW_DYNAMIC;
 
@@ -21452,17 +21457,19 @@ nk_popup_begin(struct nk_context* ctx, enum nk_popup_type type,
 
     if (nk_panel_begin(ctx, title, NK_PANEL_POPUP)) {
         /* popup is running therefore invalidate parent panels */
-        struct nk_panel* root;
-        root = win->layout;
-        while (root) {
-            root->flags |= NK_WINDOW_ROM;
-            root->flags &= ~(nk_flags)NK_WINDOW_REMOVE_ROM;
-            root = root->parent;
+        if((flags & NK_WINDOW_PASSTHROUGH) == 0) {
+            struct nk_panel* root;
+            root = win->layout;
+            while (root) {
+                root->flags |= NK_WINDOW_ROM;
+                root->flags &= ~(nk_flags)NK_WINDOW_REMOVE_ROM;
+                root = root->parent;
+            }
         }
         win->popup.active = 1;
+        popup->layout->parent = win->layout;
         popup->layout->offset_x = &popup->scrollbar.x;
         popup->layout->offset_y = &popup->scrollbar.y;
-        popup->layout->parent = win->layout;
         return 1;
     }
     else {
