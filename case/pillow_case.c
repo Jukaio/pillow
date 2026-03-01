@@ -98,7 +98,7 @@ static struct nk_rect pillow_case_menu_bar(pillow_case_executable_t *exe, struct
 				nk_layout_row_dynamic(ctx, 25, 1);
 				if (nk_menu_item_label(ctx, editor->title, NK_TEXT_LEFT)) {
 					nk_window_set_focus(ctx, editor->title);
-					
+
 					// Might be worth making this an extension - This way we can stop trickling input down!
 					// It could also cause problems. Well, well, well
 					memset(&ctx->input.mouse.buttons[NK_BUTTON_LEFT], 0, sizeof(*ctx->input.mouse.buttons));
@@ -106,7 +106,7 @@ static struct nk_rect pillow_case_menu_bar(pillow_case_executable_t *exe, struct
 			}
 			nk_menu_end(ctx);
 		}
-		
+
 		nk_menubar_end(ctx);
 	}
 	nk_end(ctx);
@@ -151,13 +151,8 @@ static pillow_exectuable_status_t pillow_case_execute(pillow_executable_state_t 
 	SDL_GetWindowSize(exe->window, &width, &height);
 	struct nk_rect bounds = nk_rect(0, 0, width, height);
 
-	if (nk_dock_begin(ctx, 0, 0, (float)width, (float)height)) {
-
-		bounds = pillow_case_menu_bar(exe, bounds);
-		pillow_case_editors(exe, bounds);
-
-		nk_dock_end(ctx);
-	}
+	bounds = pillow_case_menu_bar(exe, bounds);
+	pillow_case_editors(exe, bounds);
 
 	// nk_demo_overview(ctx);
 	//   nk_demo_configurator(ctx);
@@ -188,6 +183,7 @@ static pillow_executable_state_t *pillow_case_reload(pillow_allocator *allocator
 		pillow_case_editor_container_add(&exe.editors, "Editor 1");
 		pillow_case_editor_container_add(&exe.editors, "Editor 2");
 		pillow_case_editor_container_add(&exe.editors, "Editor 3");
+		pillow_case_editor_container_add(&exe.editors, "Editor 4");
 	}
 
 	if (previous != NULL) {

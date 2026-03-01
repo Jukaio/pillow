@@ -7,12 +7,22 @@
 #include "SDL3/SDL_render.h"
 
 #include <assert.h>
+#include <float.h>
 
 #define pillow_case_editor_dock_node_capacity 256
 #define pillow_case_editor_dock_window_capacity 128
 
 #define nk_dock_buttons_row_count 5
 #define nk_dock_buttons_column_count 5
+
+typedef enum nk_rect_edge_type
+{
+	nk_rect_edge_none = 0,
+	nk_rect_edge_left = 1,
+	nk_rect_edge_right = 2,
+	nk_rect_edge_top = 4,
+	nk_rect_edge_bottom = 8,
+} nk_rect_edge_type;
 
 typedef struct pillow_nk_device_t
 {
@@ -51,6 +61,7 @@ typedef struct nk_dock_windows_container_t
 	size_t count;
 } nk_dock_windows_container_t;
 
+
 typedef struct nk_dock_t
 {
 	nk_dock_windows_container_t windows;
@@ -78,6 +89,24 @@ typedef struct nk_dock_buttons_mask_t
 {
 	uint8_t values[nk_dock_buttons_column_count][nk_dock_buttons_row_count];
 } nk_dock_buttons_mask_t;
+
+const char *nk_rect_edge_to_string(nk_rect_edge_type edge)
+{
+	switch (edge) {
+	case nk_rect_edge_none:
+		return "nk_rect_edge_none";
+	case nk_rect_edge_left:
+		return "nk_rect_edge_left";
+	case nk_rect_edge_right:
+		return "nk_rect_edge_right";
+	case nk_rect_edge_top:
+		return "nk_rect_edge_top";
+	case nk_rect_edge_bottom:
+		return "nk_rect_edge_bottom";
+	default:
+		return "nk_rect_edge_unknown";
+	}
+}
 
 static nk_dock_window_t *nk_dock_windows_container_add(nk_dock_windows_container_t *set, struct nk_window *window)
 {
@@ -120,18 +149,16 @@ static size_t nk_dock_windows_container_find(nk_dock_windows_container_t *set, s
 	nk_hash slot = window->name % pillow_array_size(set->entries);
 	for (;;) {
 		nk_dock_window_t *entry = set->entries + slot;
-		if (strcmp(entry->title, "\1") == 0) {
-			// It is a tombstone!!
-			continue;
-		}
+		// It is a tombstone!!
+		if (strcmp(entry->title, "\1") != 0) {
+			if (entry->hash == 0) {
+				// Terminate
+				return 0;
+			}
 
-		if (entry->hash == 0) {
-			// Terminate
-			return 0;
-		}
-
-		if (strcmp(entry->title, window->name_string) == 0) {
-			return slot + 1;
+			if (strcmp(entry->title, window->name_string) == 0) {
+				return slot + 1;
+			}
 		}
 
 		slot = (slot + 1) % pillow_array_size(set->entries);
@@ -147,7 +174,8 @@ static size_t nk_dock_windows_container_remove(nk_dock_windows_container_t *set,
 	}
 
 	nk_dock_window_t *entry = set->entries + at - 1;
-	entry->title[0] = '\0';
+	entry->title[0] = '\1';
+	entry->title[1] = '\0';
 	entry->hash = 0;
 	set->count = set->count - 1;
 	return at;
@@ -499,19 +527,6 @@ struct pillow_nk_sdl_t *pillow_nk(struct nk_context *ctx)
 
 // NK EXTENSIONS!
 
-static void nk_dock_bounds_split(const struct nk_rect *rect, struct nk_rect *lhs, struct nk_rect *rhs)
-{
-	lhs->x = rect->x;
-	lhs->y = rect->y;
-	lhs->w = rect->w * 0.5f;
-	lhs->h = rect->h;
-
-	rhs->x = lhs->x + lhs->w;
-	rhs->y = rect->y;
-	rhs->w = rect->w * 0.5f;
-	rhs->h = rect->h;
-}
-
 static int nk_dock_bounds_contains(const struct nk_rect *bigger, struct nk_rect *smaller)
 {
 	if (smaller->x < bigger->x) {
@@ -621,24 +636,14 @@ static int nk_layout_dock_buttons(struct pillow_nk_sdl_t *pillow_ctx, const nk_d
 	return result;
 }
 
-// Idk if these are useful... we will see!
-int nk_dock_begin(struct nk_context *ctx, float x, float y, float w, float h)
-{
-	return 1;
-}
-
-void nk_dock_end(struct nk_context *ctx)
-{
-}
-
 static float nk_dock_remap_coordinates(float value, float old_min, float old_max, float new_min, float new_max)
 {
 	return (value - old_min) * (new_max - new_min) / (old_max - old_min) + new_min;
 }
 
-struct nk_dock_window_t *nk_dock_hovered_window(pillow_nk_sdl_t *pillow_ctx, struct nk_window** hovered)
+struct nk_dock_window_t *nk_dock_hovered_window(pillow_nk_sdl_t *pillow_ctx, struct nk_window **hovered)
 {
-	// TODO: This function is mad nasty 
+	// TODO: This function is mad nasty
 	struct nk_context *ctx = nk(pillow_ctx);
 	struct nk_window *iter = ctx->end;
 	size_t found;
@@ -663,18 +668,18 @@ struct nk_dock_window_t *nk_dock_hovered_window(pillow_nk_sdl_t *pillow_ctx, str
 		iter = iter->prev;
 	}
 	*hovered = iter;
-	if(!iter) {
+	if (!iter) {
 		return NULL;
 	}
 	return pillow_ctx->dock.windows.entries + found - 1;
 }
 
-struct nk_rect nk_rect_remainder(struct nk_rect primary, struct nk_rect sub) 
+struct nk_rect nk_rect_remainder(struct nk_rect primary, struct nk_rect sub)
 {
 	// Sub shall be a subset of the primary rect!! :) Maybe assert on contain?
 	// TODO: This function might be problematic
 	struct nk_vec2 lhs_min = nk_vec2(primary.x, primary.y);
-	struct nk_vec2 lhs_max = nk_vec2(lhs_min.x + primary.w, lhs_min.y  + primary.h);
+	struct nk_vec2 lhs_max = nk_vec2(lhs_min.x + primary.w, lhs_min.y + primary.h);
 
 	struct nk_vec2 rhs_min = nk_vec2(sub.x, sub.y);
 	struct nk_vec2 rhs_max = nk_vec2(rhs_min.x + sub.w, rhs_min.y + sub.h);
@@ -689,18 +694,106 @@ struct nk_rect nk_rect_remainder(struct nk_rect primary, struct nk_rect sub)
 	return result;
 }
 
+int nk_float_appox(float lhs, float rhs)
+{
+	const float close_enough = 1e-5f;
+	return fabsf(lhs - rhs) < close_enough;
+}
+
+nk_rect_edge_type nk_rect_exact_shared_edge(struct nk_rect lhs, struct nk_rect rhs)
+{
+	// rhs.x == left
+	// lhs.x == left
+	// lhs.y == top
+	// rhs.y == top
+
+	const float lhs_right = lhs.x + lhs.w;
+	const float lhs_bottom = lhs.y + lhs.h;
+	const float rhs_right = rhs.x + rhs.w;
+	const float rhs_bottom = rhs.y + rhs.h;
+
+	if (nk_float_appox(lhs.y, rhs.y) && nk_float_appox(lhs_bottom, rhs_bottom)) {
+		if (nk_float_appox(lhs.x, rhs_right)) {
+			return nk_rect_edge_left;
+		}
+		if (nk_float_appox(lhs_right, rhs.x)) {
+			return nk_rect_edge_right;
+		}
+	}
+
+	if (nk_float_appox(lhs.x, rhs.x) && nk_float_appox(lhs_right, rhs_right)) {
+		if (nk_float_appox(lhs.y, rhs_bottom)) {
+			return nk_rect_edge_top;
+		}
+		if (nk_float_appox(lhs_bottom, rhs.y)) {
+			return nk_rect_edge_bottom;
+		}
+	}
+
+	return nk_rect_edge_none;
+}
+
+struct nk_rect nk_rect_extend(struct nk_rect lhs, struct nk_rect rhs)
+{
+	struct nk_vec2 lhs_min = nk_vec2(lhs.x, lhs.y);
+	struct nk_vec2 lhs_max = nk_vec2(lhs_min.x + lhs.w, lhs_min.y + lhs.h);
+
+	struct nk_vec2 rhs_min = nk_vec2(rhs.x, rhs.y);
+	struct nk_vec2 rhs_max = nk_vec2(rhs_min.x + rhs.w, rhs_min.y + rhs.h);
+
+	struct nk_vec2 max = nk_vec2(fmaxf(lhs_max.x, rhs_max.x), fmaxf(lhs_max.y, rhs_max.y));
+
+	struct nk_rect result = lhs;
+	result.x = fminf(lhs.x, rhs.x);
+	result.y = fminf(lhs.y, rhs.y);
+	result.w = max.x - result.x;
+	result.h = max.y - result.y;
+	return result;
+}
+
+void nk_dock_resize(pillow_nk_sdl_t *pillow_ctx, struct nk_rect bounds)
+{
+	nk_dock_windows_container_t *windows = &pillow_ctx->dock.windows;
+
+	// First we try resizing on full edges - This is the best case scenario!
+	for (size_t index = 0; index < pillow_array_size(windows->entries); index++) {
+		if (nk_dock_windows_container_valid(windows, index)) {
+			nk_dock_window_t *entry = windows->entries + index;
+			nk_rect_edge_type edge_type = nk_rect_exact_shared_edge(bounds, entry->node.private_bounds);
+			if (edge_type != nk_rect_edge_none) {
+				struct nk_rect result = nk_rect_extend(bounds, entry->node.private_bounds);
+				entry->node.private_bounds = result;
+				break;
+			}
+		}
+	}
+
+	// The side with the MOST fitting smaller windows wins!
+	// We pretty much project a side up, left and right and check
+	// 1. collect windows in each direction
+	// 2. create an accumuator set to the width/height (depends on direction)
+	// 3. subtract the width/height from each accumaltor for each direction
+	// 4. whoever hits 0.0 wins
+	// 5. The following can not hit 0 for any window.
+	// X X Y
+	// Z W Y
+	// Z R R
+	// Is this even possible? 
+}
+
 int nk_dock_popup(struct nk_context *ctx, float x, float y, float w, float h)
 {
 	struct nk_window *target = ctx->current;
 	struct nk_rect title_bounds = target->bounds;
 	title_bounds.h = target->layout->header_height;
 
-	// These bounds are incoming! Everything else uses window bounds, bit different! :) 
+	// These bounds are incoming! Everything else uses window bounds, bit different! :)
 	struct nk_rect bounds = nk_rect(x, y, w, h);
 
 	pillow_nk_sdl_t *pillow_ctx = pillow_nk(ctx);
 
 	// TODO: Let's see if we can change the active check to a if(ctx->active) { /* Do stuff */} thing
+
 	if (ctx->active == ctx->current) {
 		if (!nk_input_is_key_down(&ctx->input, NK_KEY_CTRL)) {
 			if (nk_input_is_mouse_hovering_rect(&ctx->input, title_bounds)) {
@@ -712,7 +805,7 @@ int nk_dock_popup(struct nk_context *ctx, float x, float y, float w, float h)
 					const float h = button_height * 3;
 
 					struct nk_rect *original_bounds = &bounds;
-					struct nk_window* hovered = NULL;
+					struct nk_window *hovered = NULL;
 
 					struct nk_dock_window_t *hovered_entry = nk_dock_hovered_window(pillow_ctx, &hovered);
 					if (hovered) {
@@ -751,12 +844,11 @@ int nk_dock_popup(struct nk_context *ctx, float x, float y, float w, float h)
 								entry->node.private_bounds.x = original_bounds->x + (adjustment.value.x * original_bounds->w);
 								entry->node.private_bounds.y = original_bounds->y + (adjustment.value.y * original_bounds->h);
 
-								if(hovered_entry) {
+								if (hovered_entry) {
 									struct nk_rect other_bounds = nk_rect_remainder(*original_bounds, entry->node.private_bounds);
 									hovered_entry->node.private_bounds = other_bounds;
 								}
 							}
-
 						}
 						nk_popup_end(ctx);
 					}
@@ -775,15 +867,21 @@ int nk_dock_popup(struct nk_context *ctx, float x, float y, float w, float h)
 			const struct nk_rect *control = &entry->node.private_bounds;
 			if (prev->x != control->x || prev->y != control->y || prev->w != control->w || prev->h != control->h) {
 				entry->node.public_bounds = *control;
-				prev = control;
 				target->bounds = entry->node.public_bounds;
+
+				prev = control;
 			}
 
 			if (prev->x == target->bounds.x && prev->y == target->bounds.y && prev->w == target->bounds.w && prev->h == target->bounds.h) {
 				return 1;
 			}
+			
 			// TODO: When we undock, we need to resize!
+			
+			// Undock
+			struct nk_rect resize_bounds = entry->node.private_bounds;
 			nk_dock_windows_container_remove(&pillow_ctx->dock.windows, target);
+			nk_dock_resize(pillow_ctx, resize_bounds);
 		}
 	}
 	return 0;
