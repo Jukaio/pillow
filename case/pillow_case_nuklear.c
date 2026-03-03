@@ -824,35 +824,31 @@ void nk_dock_resize(pillow_nk_sdl_t *pillow_ctx, struct nk_rect bounds)
 			for (int index = 0; index < count; index++) {
 				nk_neighbor_t *neighbour = neighbours + index;
 				struct nk_rect other = neighbour->window->node.private_bounds;
-				// If left or right, make sure everything aligns on y correctly
-				// If top or bottom, make sure everything aligns on x correctly
-				// Pretty much, we need to fully fill the space so we can safely expand!
-				switch(current) {
-					case nk_rect_side_top: 
-					case nk_rect_side_bottom:
-						if(!neg_aligns) {
-							neg_aligns = nk_float_appox(other.x, bounds.x, 2.0f);
-						}
-						if (!pos_aligns) {
-							pos_aligns = nk_float_appox(other.x + other.w, bounds.x + bounds.w, 2.0f);
-						}
-						break;
-					case nk_rect_side_left: 
-					case nk_rect_side_right:
-						if (!neg_aligns) {
-							neg_aligns = nk_float_appox(other.y, bounds.y, 2.0f);
-						}
-						if (!pos_aligns) {
-							pos_aligns = nk_float_appox(other.y + other.h, bounds.y + bounds.h, 2.0f);
-						}
-						break;
+				switch (current) {
+				case nk_rect_side_top:
+				case nk_rect_side_bottom:
+					if (!neg_aligns) {
+						neg_aligns = nk_float_appox(other.x, bounds.x, 2.0f);
+					}
+					if (!pos_aligns) {
+						pos_aligns = nk_float_appox(other.x + other.w, bounds.x + bounds.w, 2.0f);
+					}
+					break;
+				case nk_rect_side_left:
+				case nk_rect_side_right:
+					if (!neg_aligns) {
+						neg_aligns = nk_float_appox(other.y, bounds.y, 2.0f);
+					}
+					if (!pos_aligns) {
+						pos_aligns = nk_float_appox(other.y + other.h, bounds.y + bounds.h, 2.0f);
+					}
+					break;
 				}
 			}
-			if(neg_aligns && pos_aligns)
-			{
+			if (neg_aligns && pos_aligns) {
 				for (int index = 0; index < count; index++) {
-					nk_neighbor_t* neighbour = neighbours + index;
-					struct nk_rect* other = &neighbour->window->node.private_bounds;
+					nk_neighbor_t *neighbour = neighbours + index;
+					struct nk_rect *other = &neighbour->window->node.private_bounds;
 					switch (current) {
 					case nk_rect_side_top:
 						other->h = other->h + bounds.h;
