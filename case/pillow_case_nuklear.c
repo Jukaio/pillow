@@ -667,13 +667,12 @@ struct nk_dock_window_t *nk_dock_hovered_window(pillow_nk_sdl_t *pillow_ctx, str
 	return pillow_ctx->dock.windows.entries + found - 1;
 }
 
-int nk_float_appox(float lhs, float rhs)
+static int nk_float_appox(float lhs, float rhs, float epsilon)
 {
-	const float close_enough = 1e-5f;
-	return fabsf(lhs - rhs) < close_enough;
+	return fabsf(lhs - rhs) < epsilon;
 }
 
-nk_rect_edge_type nk_rect_exact_shared_edge(struct nk_rect lhs, struct nk_rect rhs)
+static nk_rect_edge_type nk_rect_exact_shared_edge(struct nk_rect lhs, struct nk_rect rhs)
 {
 	// rhs.x == left
 	// lhs.x == left
@@ -685,20 +684,22 @@ nk_rect_edge_type nk_rect_exact_shared_edge(struct nk_rect lhs, struct nk_rect r
 	const float rhs_right = rhs.x + rhs.w;
 	const float rhs_bottom = rhs.y + rhs.h;
 
-	if (nk_float_appox(lhs.y, rhs.y) && nk_float_appox(lhs_bottom, rhs_bottom)) {
-		if (nk_float_appox(lhs.x, rhs_right)) {
+	const float close_enough = 1e-5f;
+
+	if (nk_float_appox(lhs.y, rhs.y, close_enough) && nk_float_appox(lhs_bottom, rhs_bottom, close_enough)) {
+		if (nk_float_appox(lhs.x, rhs_right, close_enough)) {
 			return nk_rect_edge_left;
 		}
-		if (nk_float_appox(lhs_right, rhs.x)) {
+		if (nk_float_appox(lhs_right, rhs.x, close_enough)) {
 			return nk_rect_edge_right;
 		}
 	}
 
-	if (nk_float_appox(lhs.x, rhs.x) && nk_float_appox(lhs_right, rhs_right)) {
-		if (nk_float_appox(lhs.y, rhs_bottom)) {
+	if (nk_float_appox(lhs.x, rhs.x, close_enough) && nk_float_appox(lhs_right, rhs_right, close_enough)) {
+		if (nk_float_appox(lhs.y, rhs_bottom, close_enough)) {
 			return nk_rect_edge_top;
 		}
-		if (nk_float_appox(lhs_bottom, rhs.y)) {
+		if (nk_float_appox(lhs_bottom, rhs.y, close_enough)) {
 			return nk_rect_edge_bottom;
 		}
 	}
@@ -727,8 +728,12 @@ struct nk_rect nk_rect_extend(struct nk_rect lhs, struct nk_rect rhs)
 void nk_dock_resize(pillow_nk_sdl_t *pillow_ctx, struct nk_rect bounds)
 {
 	nk_dock_windows_container_t *windows = &pillow_ctx->dock.windows;
+	if (windows->count == 0) {
+		return;
+	}
 
 	// First we try resizing on full edges - This is the best case scenario!
+	// This is Holy
 	for (size_t index = 0; index < pillow_array_size(windows->entries); index++) {
 		if (nk_dock_windows_container_valid(windows, index)) {
 			nk_dock_window_t *entry = windows->entries + index;
@@ -736,6 +741,135 @@ void nk_dock_resize(pillow_nk_sdl_t *pillow_ctx, struct nk_rect bounds)
 			if (edge_type != nk_rect_edge_none) {
 				struct nk_rect result = nk_rect_extend(bounds, entry->node.private_bounds);
 				entry->node.private_bounds = result;
+				return;
+			}
+		}
+	}
+
+	{
+		// SECOND PASS!!
+		// This is all UNHOLY
+		typedef enum nk_rect_side_type_t
+		{
+			nk_rect_side_top = 0,
+			nk_rect_side_bottom = 1,
+			nk_rect_side_left = 2,
+			nk_rect_side_right = 3,
+		} nk_rect_side_type_t;
+
+		typedef struct
+		{
+			nk_dock_window_t *window;
+		} nk_neighbor_t;
+
+		// Temporary collection buffer
+		int neighbour_counts[4] = {0};
+		nk_neighbor_t neighbors_per_side[pillow_array_size(neighbour_counts)][8];
+
+		for (size_t index = 0; index < pillow_array_size(windows->entries); index++) {
+			if (!nk_dock_windows_container_valid(windows, index))
+				continue;
+
+			nk_dock_window_t *entry = windows->entries + index;
+
+			const struct nk_rect other = entry->node.private_bounds;
+			const float eps = 2.0f;
+
+			int x_overlap = (bounds.x < other.x + other.w) && (bounds.x + bounds.w > other.x);
+			if (x_overlap) {
+				if (nk_float_appox(bounds.y, other.y + other.h, eps)) {
+					neighbors_per_side[nk_rect_side_top][neighbour_counts[nk_rect_side_top]] = (nk_neighbor_t){entry};
+					neighbour_counts[nk_rect_side_top] = neighbour_counts[nk_rect_side_top] + 1;
+				}
+				else if (nk_float_appox(bounds.y + bounds.h, other.y, eps)) {
+					neighbors_per_side[nk_rect_side_bottom][neighbour_counts[nk_rect_side_bottom]] = (nk_neighbor_t){entry};
+					neighbour_counts[nk_rect_side_bottom] = neighbour_counts[nk_rect_side_bottom] + 1;
+				}
+			}
+
+			int y_overlap = (bounds.y < other.y + other.h) && (bounds.y + bounds.h > other.y);
+			if (y_overlap) {
+				if (nk_float_appox(bounds.x, other.x + other.w, eps)) {
+					neighbors_per_side[nk_rect_side_left][neighbour_counts[nk_rect_side_left]] = (nk_neighbor_t){entry};
+					neighbour_counts[nk_rect_side_left] = neighbour_counts[nk_rect_side_left] + 1;
+				}
+				else if (nk_float_appox(bounds.x + bounds.w, other.x, eps)) {
+					neighbors_per_side[nk_rect_side_right][neighbour_counts[nk_rect_side_right]] = (nk_neighbor_t){entry};
+					neighbour_counts[nk_rect_side_right] = neighbour_counts[nk_rect_side_right] + 1;
+				}
+			}
+		}
+
+		nk_rect_side_type_t sorted_neighbours[4] = {0, 1, 2, 3};
+		for (int i = 0; i < 3; i++) {
+			for (int j = 0; j < 3 - i; j++) {
+				nk_rect_side_type_t lhs = sorted_neighbours[j];
+				nk_rect_side_type_t rhs = sorted_neighbours[j + 1];
+
+				if (neighbour_counts[lhs] < neighbour_counts[rhs]) {
+					nk_rect_side_type_t temp = sorted_neighbours[j];
+					sorted_neighbours[j] = sorted_neighbours[j + 1];
+					sorted_neighbours[j + 1] = temp;
+				}
+			}
+		}
+
+		for (int i = 0; i < 3; i++) {
+			nk_rect_side_type_t current = sorted_neighbours[i];
+			int count = neighbour_counts[current];
+			nk_neighbor_t *neighbours = (nk_neighbor_t *)neighbors_per_side[current];
+
+			int neg_aligns = 0;
+			int pos_aligns = 0;
+			for (int index = 0; index < count; index++) {
+				nk_neighbor_t *neighbour = neighbours + index;
+				struct nk_rect other = neighbour->window->node.private_bounds;
+				// If left or right, make sure everything aligns on y correctly
+				// If top or bottom, make sure everything aligns on x correctly
+				// Pretty much, we need to fully fill the space so we can safely expand!
+				switch(current) {
+					case nk_rect_side_top: 
+					case nk_rect_side_bottom:
+						if(!neg_aligns) {
+							neg_aligns = nk_float_appox(other.x, bounds.x, 2.0f);
+						}
+						if (!pos_aligns) {
+							pos_aligns = nk_float_appox(other.x + other.w, bounds.x + bounds.w, 2.0f);
+						}
+						break;
+					case nk_rect_side_left: 
+					case nk_rect_side_right:
+						if (!neg_aligns) {
+							neg_aligns = nk_float_appox(other.y, bounds.y, 2.0f);
+						}
+						if (!pos_aligns) {
+							pos_aligns = nk_float_appox(other.y + other.h, bounds.y + bounds.h, 2.0f);
+						}
+						break;
+				}
+			}
+			if(neg_aligns && pos_aligns)
+			{
+				for (int index = 0; index < count; index++) {
+					nk_neighbor_t* neighbour = neighbours + index;
+					struct nk_rect* other = &neighbour->window->node.private_bounds;
+					switch (current) {
+					case nk_rect_side_top:
+						other->h = other->h + bounds.h;
+						break;
+					case nk_rect_side_bottom:
+						other->h = other->h + bounds.h;
+						other->y = other->y - bounds.h;
+						break;
+					case nk_rect_side_left:
+						other->w = other->w + bounds.w;
+						break;
+					case nk_rect_side_right:
+						other->w = other->w + bounds.w;
+						other->x = other->x - bounds.w;
+						break;
+					}
+				}
 				break;
 			}
 		}
@@ -772,7 +906,7 @@ static int nk_int_mod(int value, int bound)
 	return result;
 }
 
-void nk_rect_split(struct nk_rect bounds, struct nk_vec2 adj, struct nk_rect *lhs, struct nk_rect *rhs)
+static void nk_rect_split(struct nk_rect bounds, struct nk_vec2 adj, struct nk_rect *lhs, struct nk_rect *rhs)
 {
 	int scaled_w = (int)floorf((fabsf(adj.x) * (float)bounds.w) + 0.5f);
 	int scaled_h = (int)floorf((fabsf(adj.y) * (float)bounds.h) + 0.5f);
@@ -798,9 +932,9 @@ void nk_rect_split(struct nk_rect bounds, struct nk_vec2 adj, struct nk_rect *lh
 	rhs->y = bounds.y + nk_int_mod(off_y + lhs->h, bounds.h);
 }
 
-static void nk_dock_popup_rect_slice_test(struct nk_context* ctx)
+static void nk_dock_popup_rect_slice_test(struct nk_context *ctx)
 {
-	struct nk_command_buffer* canvas = nk_window_get_canvas(ctx);
+	struct nk_command_buffer *canvas = nk_window_get_canvas(ctx);
 
 	struct nk_rect rects[] = {
 		nk_rect(100, 100, 160, 100),
