@@ -800,7 +800,7 @@ void nk_dock_resize(pillow_nk_sdl_t *pillow_ctx, struct nk_rect bounds)
 			}
 		}
 
-		nk_rect_side_type_t sorted_neighbours[4] = {0, 1, 2, 3};
+		nk_rect_side_type_t sorted_neighbours[pillow_array_size(neighbour_counts)] = {0, 1, 2, 3};
 		for (int i = 0; i < 3; i++) {
 			for (int j = 0; j < 3 - i; j++) {
 				nk_rect_side_type_t lhs = sorted_neighbours[j];
