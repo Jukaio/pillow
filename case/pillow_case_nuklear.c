@@ -594,7 +594,7 @@ static int nk_layout_dock_buttons(struct pillow_nk_sdl_t *pillow_ctx, const nk_d
 		},
 		{
 			.title = "Dock Column 3",
-			.entries = {{0}, {0}, {.type = dock_type_outline, .value = {0.7f, 0.0f}}, {0}, {0}},
+			.entries = {{0}, {0}, {.type = dock_type_outline, .value = {0.5f, 0.0f}}, {0}, {0}},
 		},
 		{
 			.title = "Dock Column 4",
@@ -634,11 +634,6 @@ static int nk_layout_dock_buttons(struct pillow_nk_sdl_t *pillow_ctx, const nk_d
 	return result;
 }
 
-static float nk_dock_remap_coordinates(float value, float old_min, float old_max, float new_min, float new_max)
-{
-	return (value - old_min) * (new_max - new_min) / (old_max - old_min) + new_min;
-}
-
 struct nk_dock_window_t *nk_dock_hovered_window(pillow_nk_sdl_t *pillow_ctx, struct nk_window **hovered)
 {
 	// TODO: This function is mad nasty
@@ -670,26 +665,6 @@ struct nk_dock_window_t *nk_dock_hovered_window(pillow_nk_sdl_t *pillow_ctx, str
 		return NULL;
 	}
 	return pillow_ctx->dock.windows.entries + found - 1;
-}
-
-struct nk_rect nk_rect_remainder(struct nk_rect primary, struct nk_rect sub)
-{
-	// Sub shall be a subset of the primary rect!! :) Maybe assert on contain?
-	// TODO: This function might be problematic
-	struct nk_vec2 lhs_min = nk_vec2(primary.x, primary.y);
-	struct nk_vec2 lhs_max = nk_vec2(lhs_min.x + primary.w, lhs_min.y + primary.h);
-
-	struct nk_vec2 rhs_min = nk_vec2(sub.x, sub.y);
-	struct nk_vec2 rhs_max = nk_vec2(rhs_min.x + sub.w, rhs_min.y + sub.h);
-
-	struct nk_vec2 delta_min = nk_vec2(lhs_min.x - rhs_min.x, lhs_min.y - rhs_min.y);
-	struct nk_vec2 delta_max = nk_vec2(lhs_max.x - rhs_max.x, lhs_max.y - rhs_max.y);
-
-	struct nk_rect result = sub;
-	result.x = result.x + delta_max.x + delta_min.x;
-	result.y = result.y + delta_max.y + delta_min.y;
-
-	return result;
 }
 
 int nk_float_appox(float lhs, float rhs)
@@ -779,35 +754,103 @@ void nk_dock_resize(pillow_nk_sdl_t *pillow_ctx, struct nk_rect bounds)
 	// Is this even possible?
 }
 
-float nk_float_remainder(float value, float bound)
+static int nk_int_wrap(int value, int bound)
 {
-	float result = fmodf(value, bound);
-	return result;
+	if (bound <= 0)
+		return 0;
+	int result = value % bound;
+	return (result == 0) ? bound : result;
 }
 
-float nk_float_mod(float value, float bound)
+static int nk_int_mod(int value, int bound)
 {
-	float result = fmodf(value, bound);
-	if (result < 0) {
+	if (bound <= 0)
+		return 0;
+	int result = value % bound;
+	if (result < 0)
 		result += bound;
-	}
 	return result;
 }
 
-float nk_float_wrap(float value, float bound)
+void nk_rect_split(struct nk_rect bounds, struct nk_vec2 adj, struct nk_rect *lhs, struct nk_rect *rhs)
 {
-	float result = fmodf(value, bound);
-	if (result == 0.0f) {
-		return bound;
-	}
-	return result;
+	int scaled_w = (int)floorf((fabsf(adj.x) * (float)bounds.w) + 0.5f);
+	int scaled_h = (int)floorf((fabsf(adj.y) * (float)bounds.h) + 0.5f);
+
+	float off_fact_x = 1.0f - ((fabsf(adj.x) + adj.x) * 0.5f);
+	float off_fact_y = 1.0f - ((fabsf(adj.y) + adj.y) * 0.5f);
+
+	int off_x = (int)floorf(((float)bounds.w * off_fact_x) + 0.5f);
+	int off_y = (int)floorf(((float)bounds.h * off_fact_y) + 0.5f);
+
+	lhs->w = nk_int_wrap(bounds.w + scaled_w, bounds.w);
+	lhs->h = nk_int_wrap(bounds.h + scaled_h, bounds.h);
+	lhs->x = bounds.x + nk_int_mod(off_x, bounds.w);
+	lhs->y = bounds.y + nk_int_mod(off_y, bounds.h);
+
+	int rem_w = bounds.w - lhs->w;
+	int rem_h = bounds.h - lhs->h;
+
+	rhs->w = nk_int_wrap(bounds.w + rem_w, bounds.w);
+	rhs->h = nk_int_wrap(bounds.h + rem_h, bounds.h);
+
+	rhs->x = bounds.x + nk_int_mod(off_x + lhs->w, bounds.w);
+	rhs->y = bounds.y + nk_int_mod(off_y + lhs->h, bounds.h);
 }
 
-float nk_coordinate_remap(float x, float out_min, float out_max)
+static void nk_dock_popup_rect_slice_test(struct nk_context* ctx)
 {
-	const float cs_min = -1.0f;
-	const float cs_max = 1.0f;
-	return out_min + (x - cs_min) * (out_max - out_min) / (cs_max - cs_min);
+	struct nk_command_buffer* canvas = nk_window_get_canvas(ctx);
+
+	struct nk_rect rects[] = {
+		nk_rect(100, 100, 160, 100),
+		nk_rect(100, 220, 160, 100),
+		nk_rect(100, 340, 160, 100),
+		nk_rect(100, 460, 160, 100),
+		nk_rect(400, 100, 160, 100),
+		nk_rect(400, 220, 160, 100),
+		nk_rect(400, 340, 160, 100),
+		nk_rect(400, 460, 160, 100),
+		nk_rect(240, 580, 160, 100),
+	};
+
+	struct nk_vec2 split[pillow_array_size(rects)] = {
+		nk_vec2(-0.7f, 0.0f),
+		nk_vec2(0.7f, 0.0f),
+		nk_vec2(0.0f, 0.7f),
+		nk_vec2(0.0f, -0.7f),
+		nk_vec2(-0.3f, -0.3f),
+		nk_vec2(-0.5f, 0.5f),
+		nk_vec2(0.7f, -0.7f),
+		nk_vec2(0.3f, 0.7f),
+		nk_vec2(0.0f, 0.0f),
+	};
+
+	static int value = 3;
+	nk_layout_row_static(ctx, 36.0f, 256, 1);
+	value = nk_propertyi(ctx, "Counter", 0, value, 10, 1, 1.0f);
+
+	static int split_index = 0;
+	nk_layout_row_static(ctx, 36.0f, 256, 1);
+	split_index = nk_propertyi(ctx, "Split", 0, split_index, pillow_array_size(rects), 1, 1.0f);
+
+	{
+		struct nk_rect special = nk_rect(64.0f, 258.0f, 1280 * 0.5f, 720 * 0.5f);
+		nk_stroke_rect(canvas, special, 0.0f, 2.0f, nk_rgba(255, 0, 0, 255));
+
+		size_t count = value;
+		for (size_t index = 0; index < count; index++) {
+			struct nk_rect rhs;
+			nk_rect_split(special, split[split_index], &special, &rhs);
+
+			struct nk_color hsv = nk_hsv((int)(((float)index / (float)count) * 255.0f), 255, 255);
+
+			nk_stroke_rect(canvas, special, 0, 4.0f, hsv);
+			nk_fill_rect(canvas, rhs, 0.0f, hsv);
+		}
+
+		nk_fill_rect(canvas, special, 4.0f, nk_rgba(255, 255, 255, 255));
+	}
 }
 
 int nk_dock_popup(struct nk_context *ctx, float x, float y, float w, float h)
@@ -868,39 +911,9 @@ int nk_dock_popup(struct nk_context *ctx, float x, float y, float w, float h)
 						if (nk_layout_dock_buttons(pillow_ctx, &mask, &adjustment)) {
 							nk_dock_window_t *entry = nk_dock_windows_container_add(&pillow_ctx->dock.windows, target);
 							if (entry) {
-								// adjustment.value.x = nk_coordinates_map(adjustment.value.x);
-								// adjustment.value.y = nk_coordinates_map(adjustment.value.y);
-								const float cs_min = -1.0f;
-								const float cs_max = 1.0f;
-								const float cs_distance = cs_max - cs_min;
-
-								const float factor_width = fabsf(adjustment.value.x);
-								const float factor_height = fabsf(adjustment.value.y);
-
-								const float scaled_width = factor_width * original_bounds->w;
-								const float scaled_height = factor_height * original_bounds->h;
-
-								const float offset_factor_width = 1.0f - ((factor_width + adjustment.value.x) * 0.5f);
-								const float offset_factor_height = 1.0f - ((factor_height + adjustment.value.y) * 0.5f);
-
-								const float offset_width = original_bounds->w * offset_factor_width;
-								const float offset_height = original_bounds->h * offset_factor_height;
-
-								entry->node.private_bounds.w = nk_float_wrap(original_bounds->w + scaled_width, original_bounds->w);
-								entry->node.private_bounds.h = nk_float_wrap(original_bounds->h + scaled_height, original_bounds->h);
-								entry->node.private_bounds.x = nk_float_mod(offset_width, original_bounds->w) + original_bounds->x;
-								entry->node.private_bounds.y = nk_float_mod(offset_height, original_bounds->h) + original_bounds->y;
 
 								struct nk_rect remainder;
-								const float remainer_scaled_width = original_bounds->w - entry->node.private_bounds.w;
-								const float remainer_scaled_height = original_bounds->h - entry->node.private_bounds.h;
-
-								remainder.w = nk_float_wrap(original_bounds->w + remainer_scaled_width, original_bounds->w);
-								remainder.h = nk_float_wrap(original_bounds->h + remainer_scaled_height, original_bounds->h);
-
-								// TODO: Fix this, so far everything else seems to work
-								remainder.x = nk_float_mod(original_bounds->w - entry->node.private_bounds.w, original_bounds->w) + original_bounds->x;
-								remainder.y = nk_float_mod(original_bounds->h - entry->node.private_bounds.h, original_bounds->h) + original_bounds->y;
+								nk_rect_split(*original_bounds, adjustment.value, &entry->node.private_bounds, &remainder);
 
 								if (hovered_entry) {
 									hovered_entry->node.private_bounds = remainder;
@@ -915,6 +928,7 @@ int nk_dock_popup(struct nk_context *ctx, float x, float y, float w, float h)
 			}
 		}
 	}
+
 	{
 		const size_t found = nk_dock_windows_container_find(&pillow_ctx->dock.windows, target);
 		if (found) {
@@ -942,5 +956,6 @@ int nk_dock_popup(struct nk_context *ctx, float x, float y, float w, float h)
 			nk_dock_resize(pillow_ctx, resize_bounds);
 		}
 	}
+
 	return 0;
 }
