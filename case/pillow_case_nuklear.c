@@ -899,8 +899,8 @@ int nk_dock_popup(struct nk_context *ctx, float x, float y, float w, float h)
 								remainder.h = nk_float_wrap(original_bounds->h + remainer_scaled_height, original_bounds->h);
 
 								// TODO: Fix this, so far everything else seems to work
-								remainder.x = nk_float_mod(entry->node.private_bounds.w + entry->node.private_bounds.x, original_bounds->w);
-								remainder.y = nk_float_mod(entry->node.private_bounds.h + entry->node.private_bounds.y, original_bounds->h);
+								remainder.x = nk_float_mod(original_bounds->w - entry->node.private_bounds.w, original_bounds->w) + original_bounds->x;
+								remainder.y = nk_float_mod(original_bounds->h - entry->node.private_bounds.h, original_bounds->h) + original_bounds->y;
 
 								if (hovered_entry) {
 									hovered_entry->node.private_bounds = remainder;
