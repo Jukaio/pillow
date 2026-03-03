@@ -61,7 +61,6 @@ typedef struct nk_dock_windows_container_t
 	size_t count;
 } nk_dock_windows_container_t;
 
-
 typedef struct nk_dock_t
 {
 	nk_dock_windows_container_t windows;
@@ -82,7 +81,6 @@ typedef struct nk_dock_adjustment_t
 {
 	// nk_dock_adjustment_type_t type;
 	struct nk_vec2 value;
-	struct nk_vec2 factor;
 } nk_dock_adjustment_t;
 
 typedef struct nk_dock_buttons_mask_t
@@ -560,17 +558,15 @@ static int nk_release_button_symbol(struct nk_context *ctx, enum nk_symbol_type 
 
 static int nk_layout_dock_buttons(struct pillow_nk_sdl_t *pillow_ctx, const nk_dock_buttons_mask_t *deactivate, struct nk_dock_adjustment_t *adjustment)
 {
-	typedef enum dock_entry_type_t
+	typedef enum dock_type_t
 	{
-		dock_entry_spacer,
-		dock_entry_static,
-		dock_entry_dynamic,
-	} dock_entry_type_t;
-
+		dock_type_none = 0,
+		dock_type_outline = 1,
+	} dock_type_t;
 	typedef struct dock_column_entry_config_t
 	{
+		dock_type_t type;
 		struct nk_vec2 value;
-		struct nk_vec2 factor;
 	} dock_column_entry_config_t;
 
 	typedef struct dock_column_config_t
@@ -582,23 +578,27 @@ static int nk_layout_dock_buttons(struct pillow_nk_sdl_t *pillow_ctx, const nk_d
 	static const dock_column_config_t columns[nk_dock_buttons_column_count] = {
 		{
 			.title = "Dock Column 0",
-			.entries = {{.value = {0.0f, 0.0f}, .factor = {0.5f, 0.5f}}, {0}, {0}, {0}, {.value = {0.0f, 0.5f}, .factor = {0.5f, 0.5f}}},
+			.entries = {{.type = dock_type_outline, .value = {-0.5f, -0.5f}}, {0}, {0}, {0}, {.type = dock_type_outline, .value = {-0.5f, 0.5f}}},
 		},
 		{
 			.title = "Dock Column 1",
-			.entries = {{0}, {0}, {.value = {0.0f, 0.0f}, .factor = {0.5f, 1.0f}}, {0}, {0}},
+			.entries = {{0}, {0}, {.type = dock_type_outline, .value = {-0.5f, 0.0f}}, {0}, {0}},
 		},
 		{
 			.title = "Dock Column 2",
-			.entries = {{0}, {.value = {0.0f, 0.0}, .factor = {1.0f, 0.5f}}, {.value = {0.0f, 0.0f}, .factor = {1.0f, 1.0f}}, {.value = {0.0f, 0.5f}, .factor = {1.0f, 0.5f}}, {0}},
+			.entries = {{0},
+	                    {.type = dock_type_outline, .value = {0.0f, -0.5f}},
+	                    {.type = dock_type_outline, .value = {0.0f, 0.0f}},
+	                    {.type = dock_type_outline, .value = {0.0f, 0.5f}},
+	                    {0}},
 		},
 		{
 			.title = "Dock Column 3",
-			.entries = {{0}, {0}, {.value = {0.5f, 0.0f}, .factor = {0.5f, 1.0f}}, {0}, {0}},
+			.entries = {{0}, {0}, {.type = dock_type_outline, .value = {0.7f, 0.0f}}, {0}, {0}},
 		},
 		{
 			.title = "Dock Column 4",
-			.entries = {{.value = {0.5f, 0.0f}, .factor = {0.5f, 0.5f}}, {0}, {0}, {0}, {.value = {0.5f, 0.5f}, .factor = {0.5f, 0.5f}}},
+			.entries = {{.type = dock_type_outline, .value = {0.5f, -0.5f}}, {0}, {0}, {0}, {.type = dock_type_outline, .value = {0.5f, 0.5f}}},
 		},
 	};
 
@@ -608,7 +608,7 @@ static int nk_layout_dock_buttons(struct pillow_nk_sdl_t *pillow_ctx, const nk_d
 	int result = 0;
 	nk_layout_row_dynamic(ctx, bounds.h, pillow_array_size(columns));
 	for (size_t column_index = 0; column_index < pillow_array_size(columns); column_index++) {
-		dock_column_config_t *column = columns + column_index;
+		const dock_column_config_t *column = columns + column_index;
 
 		if (nk_group_begin(ctx, column->title, NK_WINDOW_NO_SCROLLBAR)) {
 			nk_layout_row_dynamic(ctx, 0.0f, 1);
@@ -618,14 +618,12 @@ static int nk_layout_dock_buttons(struct pillow_nk_sdl_t *pillow_ctx, const nk_d
 
 				dock_column_entry_config_t *entry = column->entries + entry_index;
 				struct nk_vec2 value = entry->value;
-				struct nk_vec2 factor = entry->factor;
-				if (is_off || value.x == 0 && value.y == 0 && factor.x == 0 && factor.y == 0) {
+				if (is_off || entry->type == dock_type_none) {
 					nk_spacer(ctx);
 				}
 				else {
 					if (nk_release_button_symbol(ctx, NK_SYMBOL_RECT_OUTLINE)) {
 						adjustment->value = entry->value;
-						adjustment->factor = entry->factor;
 						result = 1;
 					}
 				}
@@ -778,7 +776,38 @@ void nk_dock_resize(pillow_nk_sdl_t *pillow_ctx, struct nk_rect bounds)
 	// X X Y
 	// Z W Y
 	// Z R R
-	// Is this even possible? 
+	// Is this even possible?
+}
+
+float nk_float_remainder(float value, float bound)
+{
+	float result = fmodf(value, bound);
+	return result;
+}
+
+float nk_float_mod(float value, float bound)
+{
+	float result = fmodf(value, bound);
+	if (result < 0) {
+		result += bound;
+	}
+	return result;
+}
+
+float nk_float_wrap(float value, float bound)
+{
+	float result = fmodf(value, bound);
+	if (result == 0.0f) {
+		return bound;
+	}
+	return result;
+}
+
+float nk_coordinate_remap(float x, float out_min, float out_max)
+{
+	const float cs_min = -1.0f;
+	const float cs_max = 1.0f;
+	return out_min + (x - cs_min) * (out_max - out_min) / (cs_max - cs_min);
 }
 
 int nk_dock_popup(struct nk_context *ctx, float x, float y, float w, float h)
@@ -839,15 +868,44 @@ int nk_dock_popup(struct nk_context *ctx, float x, float y, float w, float h)
 						if (nk_layout_dock_buttons(pillow_ctx, &mask, &adjustment)) {
 							nk_dock_window_t *entry = nk_dock_windows_container_add(&pillow_ctx->dock.windows, target);
 							if (entry) {
-								entry->node.private_bounds.w = original_bounds->w * adjustment.factor.x;
-								entry->node.private_bounds.h = original_bounds->h * adjustment.factor.y;
-								entry->node.private_bounds.x = original_bounds->x + (adjustment.value.x * original_bounds->w);
-								entry->node.private_bounds.y = original_bounds->y + (adjustment.value.y * original_bounds->h);
+								// adjustment.value.x = nk_coordinates_map(adjustment.value.x);
+								// adjustment.value.y = nk_coordinates_map(adjustment.value.y);
+								const float cs_min = -1.0f;
+								const float cs_max = 1.0f;
+								const float cs_distance = cs_max - cs_min;
+
+								const float factor_width = fabsf(adjustment.value.x);
+								const float factor_height = fabsf(adjustment.value.y);
+
+								const float scaled_width = factor_width * original_bounds->w;
+								const float scaled_height = factor_height * original_bounds->h;
+
+								const float offset_factor_width = 1.0f - ((factor_width + adjustment.value.x) * 0.5f);
+								const float offset_factor_height = 1.0f - ((factor_height + adjustment.value.y) * 0.5f);
+
+								const float offset_width = original_bounds->w * offset_factor_width;
+								const float offset_height = original_bounds->h * offset_factor_height;
+
+								entry->node.private_bounds.w = nk_float_wrap(original_bounds->w + scaled_width, original_bounds->w);
+								entry->node.private_bounds.h = nk_float_wrap(original_bounds->h + scaled_height, original_bounds->h);
+								entry->node.private_bounds.x = nk_float_mod(offset_width, original_bounds->w) + original_bounds->x;
+								entry->node.private_bounds.y = nk_float_mod(offset_height, original_bounds->h) + original_bounds->y;
+
+								struct nk_rect remainder;
+								const float remainer_scaled_width = original_bounds->w - entry->node.private_bounds.w;
+								const float remainer_scaled_height = original_bounds->h - entry->node.private_bounds.h;
+
+								remainder.w = nk_float_wrap(original_bounds->w + remainer_scaled_width, original_bounds->w);
+								remainder.h = nk_float_wrap(original_bounds->h + remainer_scaled_height, original_bounds->h);
+
+								// TODO: Fix this, so far everything else seems to work
+								remainder.x = nk_float_mod(entry->node.private_bounds.w + entry->node.private_bounds.x, original_bounds->w);
+								remainder.y = nk_float_mod(entry->node.private_bounds.h + entry->node.private_bounds.y, original_bounds->h);
 
 								if (hovered_entry) {
-									struct nk_rect other_bounds = nk_rect_remainder(*original_bounds, entry->node.private_bounds);
-									hovered_entry->node.private_bounds = other_bounds;
+									hovered_entry->node.private_bounds = remainder;
 								}
+								// struct nk_rect other_bounds = nk_rect_remainder(*original_bounds, entry->node.private_bounds);
 							}
 						}
 						nk_popup_end(ctx);
@@ -875,9 +933,9 @@ int nk_dock_popup(struct nk_context *ctx, float x, float y, float w, float h)
 			if (prev->x == target->bounds.x && prev->y == target->bounds.y && prev->w == target->bounds.w && prev->h == target->bounds.h) {
 				return 1;
 			}
-			
+
 			// TODO: When we undock, we need to resize!
-			
+
 			// Undock
 			struct nk_rect resize_bounds = entry->node.private_bounds;
 			nk_dock_windows_container_remove(&pillow_ctx->dock.windows, target);
