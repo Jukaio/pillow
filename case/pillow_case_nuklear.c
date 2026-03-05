@@ -3,6 +3,7 @@
 #include "pillow_allocator.h"
 #include "pillow_array.h"
 
+#include "SDL3/SDL_clipboard.h"
 #include "SDL3/SDL_log.h"
 #include "SDL3/SDL_render.h"
 
@@ -902,16 +903,27 @@ static int nk_int_mod(int value, int bound)
 	return result;
 }
 
+int nk_round_to_pixel(float value)
+{
+	return (int)roundf(value);
+}
+
 static void nk_rect_split(struct nk_rect bounds, struct nk_vec2 adj, struct nk_rect *lhs, struct nk_rect *rhs)
 {
-	int scaled_w = (int)floorf((fabsf(adj.x) * (float)bounds.w) + 0.5f);
-	int scaled_h = (int)floorf((fabsf(adj.y) * (float)bounds.h) + 0.5f);
+	// If adj is positive and we attach down or right, we go one pixel too far in almost every more fractional case!
+	float scaled_frac_x = (fabsf(adj.x) * (float)bounds.w);
+	float scaled_frac_y = (fabsf(adj.y) * (float)bounds.h);
+
+	// Round to pixel
+	int scaled_w = nk_round_to_pixel(scaled_frac_x);
+	int scaled_h = nk_round_to_pixel(scaled_frac_y);
 
 	float off_fact_x = 1.0f - ((fabsf(adj.x) + adj.x) * 0.5f);
 	float off_fact_y = 1.0f - ((fabsf(adj.y) + adj.y) * 0.5f);
-
-	int off_x = (int)floorf(((float)bounds.w * off_fact_x) + 0.5f);
-	int off_y = (int)floorf(((float)bounds.h * off_fact_y) + 0.5f);
+	float offset_frac_x = ((float)bounds.w * off_fact_x);
+	float offset_frac_y = ((float)bounds.h * off_fact_y);
+	int off_x = floorf(offset_frac_x);
+	int off_y = floorf(offset_frac_y);
 
 	lhs->w = nk_int_wrap(bounds.w + scaled_w, bounds.w);
 	lhs->h = nk_int_wrap(bounds.h + scaled_h, bounds.h);
@@ -995,7 +1007,29 @@ int nk_dock_popup(struct nk_context *ctx, float x, float y, float w, float h)
 	pillow_nk_sdl_t *pillow_ctx = pillow_nk(ctx);
 
 	// TODO: Let's see if we can change the active check to a if(ctx->active) { /* Do stuff */} thing
+	{
+		struct nk_rect popup_rect = nk_rect(0, 0, ctx->current->bounds.w, ctx->current->bounds.h);
 
+		if (nk_input_is_key_down(&ctx->input, NK_KEY_CTRL)) {
+			if (nk_popup_begin(ctx, NK_POPUP_DYNAMIC, "DOCK-POPUP", NK_WINDOW_PASSTHROUGH | NK_WINDOW_NO_SCROLLBAR, popup_rect)) {
+				const size_t found = nk_dock_windows_container_find(&pillow_ctx->dock.windows, target);
+				if (found) {
+					// If position or size changes that has not been driven by docking, it does not count as docked anymore!
+					nk_dock_window_t *entry = pillow_ctx->dock.windows.entries + found - 1;
+
+					struct nk_rect rect = entry->node.private_bounds;
+					nk_layout_row_dynamic(ctx, 36.0f, 1);
+					nk_labelf(ctx, NK_TEXT_CENTERED, "x=%f y=%f", rect.x, rect.y);
+					nk_layout_row_dynamic(ctx, 36.0f, 1);
+					nk_labelf(ctx, NK_TEXT_CENTERED, "w=%f h=%f", rect.w, rect.h);
+					nk_layout_row_dynamic(ctx, 36.0f, 1);
+					nk_labelf(ctx, NK_TEXT_CENTERED, "max-x=%f max-y=%f", rect.x + rect.w, rect.y + rect.h);
+				}
+
+				nk_popup_end(ctx);
+			}
+		}
+	}
 	if (ctx->active == ctx->current) {
 		if (!nk_input_is_key_down(&ctx->input, NK_KEY_CTRL)) {
 			if (nk_input_is_mouse_hovering_rect(&ctx->input, title_bounds)) {
@@ -1024,7 +1058,6 @@ int nk_dock_popup(struct nk_context *ctx, float x, float y, float w, float h)
 
 					struct nk_rect popup_rect = nk_rect(x, y, w, h);
 
-					nk_style_push_float(ctx, &ctx->style.window.popup_padding, 8.0f);
 					if (nk_popup_begin(ctx, NK_POPUP_DYNAMIC, "DOCK-POPUP", NK_WINDOW_PASSTHROUGH | NK_WINDOW_NO_SCROLLBAR, popup_rect)) {
 						nk_dock_buttons_mask_t mask = {0};
 						mask.values[2][2] = 0xFF;
@@ -1053,7 +1086,6 @@ int nk_dock_popup(struct nk_context *ctx, float x, float y, float w, float h)
 						}
 						nk_popup_end(ctx);
 					}
-					nk_style_pop_float(ctx);
 				}
 			}
 		}
@@ -1075,7 +1107,14 @@ int nk_dock_popup(struct nk_context *ctx, float x, float y, float w, float h)
 			}
 
 			if (prev->x == target->bounds.x && prev->y == target->bounds.y && prev->w == target->bounds.w && prev->h == target->bounds.h) {
+				// Keep scaling deactivated at all costs
+				target->layout->flags = target->layout->flags & ~NK_WINDOW_SCALABLE;
 				return 1;
+			}
+
+			// Reactivate scaling
+			if (target->flags & NK_WINDOW_SCALABLE) {
+				target->layout->flags = target->layout->flags | NK_WINDOW_SCALABLE;
 			}
 
 			// TODO: When we undock, we need to resize!
