@@ -9,8 +9,9 @@
 
 #include <assert.h>
 #include <float.h>
+#include <stdio.h>
 
-#define pillow_case_editor_dock_node_capacity 256
+#define pillow_case_editor_dock_empty_capacity 64
 #define pillow_case_editor_dock_window_capacity 128
 
 #define nk_dock_buttons_row_count 5
@@ -52,6 +53,9 @@ typedef struct nk_dock_window_t
 {
 	nk_dock_node_t node;
 
+	// Make this a bitfield when we have more state to track!
+	int was_minimised;
+
 	nk_hash hash;
 	char title[NK_WINDOW_MAX_NAME];
 } nk_dock_window_t;
@@ -62,9 +66,21 @@ typedef struct nk_dock_windows_container_t
 	size_t count;
 } nk_dock_windows_container_t;
 
+typedef struct nk_dock_empty_t
+{
+	struct nk_rect bounds;
+} nk_dock_empty_t;
+
+typedef struct nk_dock_empty_container_t
+{
+	nk_dock_empty_t entries[pillow_case_editor_dock_empty_capacity];
+	size_t count;
+} nk_dock_empty_container_t;
+
 typedef struct nk_dock_t
 {
 	nk_dock_windows_container_t windows;
+	nk_dock_empty_container_t empties;
 } nk_dock_t;
 
 typedef struct pillow_nk_sdl_t
@@ -107,8 +123,53 @@ const char *nk_rect_edge_to_string(nk_rect_edge_type edge)
 	}
 }
 
+static int nk_rect_equals(struct nk_rect lhs, struct nk_rect rhs)
+{
+	return lhs.x == rhs.x && lhs.y == rhs.y && lhs.w == rhs.w && lhs.h == rhs.h;
+}
+
+static float nk_rect_left(struct nk_rect rect)
+{
+	return rect.x;
+}
+
+static float nk_rect_right(struct nk_rect rect)
+{
+	return rect.x + rect.w;
+}
+
+static float nk_rect_top(struct nk_rect rect)
+{
+	return rect.y;
+}
+
+static float nk_rect_bottom(struct nk_rect rect)
+{
+	return rect.y + rect.h;
+}
+
+static struct nk_vec2 nk_rect_min(struct nk_rect rect)
+{
+	return (struct nk_vec2){
+		.x = rect.x,
+		.y = rect.y,
+	};
+}
+
+static struct nk_vec2 nk_rect_max(struct nk_rect rect)
+{
+	return (struct nk_vec2){
+		.x = rect.x + rect.w,
+		.y = rect.y + rect.h,
+	};
+}
+
 static nk_dock_window_t *nk_dock_windows_container_add(nk_dock_windows_container_t *set, struct nk_window *window)
 {
+	if (set->count == pillow_array_size(set->entries)) {
+		return NULL;
+	}
+
 	nk_hash hash = window->name;
 	const char *title = window->name_string;
 	nk_hash slot = hash % pillow_array_size(set->entries);
@@ -178,6 +239,17 @@ static size_t nk_dock_windows_container_remove(nk_dock_windows_container_t *set,
 	entry->hash = 0;
 	set->count = set->count - 1;
 	return at;
+}
+
+static void nk_dock_empty_container_push(nk_dock_empty_container_t *list, const struct nk_rect *bounds)
+{
+	if (list->count == pillow_array_size(list->entries)) {
+		return NULL;
+	}
+
+	nk_dock_empty_t *entry = list->entries + list->count;
+	list->count = list->count + 1;
+	entry->bounds = *bounds;
 }
 
 static void nk_sdl_clipboard_paste(nk_handle usr, struct nk_text_edit *edit)
@@ -526,18 +598,18 @@ struct pillow_nk_sdl_t *pillow_nk(struct nk_context *ctx)
 
 // NK EXTENSIONS!
 
-static int nk_dock_bounds_contains(const struct nk_rect *bigger, struct nk_rect *smaller)
+static int nk_dock_bounds_contains(const struct nk_rect bigger, struct nk_rect smaller)
 {
-	if (smaller->x < bigger->x) {
+	if (nk_rect_left(smaller) < nk_rect_left(bigger)) {
 		return 0;
 	}
-	if (smaller->y < bigger->y) {
+	if (nk_rect_top(smaller) < nk_rect_top(bigger)) {
 		return 0;
 	}
-	if ((smaller->x + smaller->w) > (bigger->x + bigger->w)) {
+	if (nk_rect_right(smaller) > nk_rect_right(bigger)) {
 		return 0;
 	}
-	if ((smaller->y + smaller->h) > (bigger->y + bigger->h)) {
+	if (nk_rect_bottom(smaller) > nk_rect_bottom(bigger)) {
 		return 0;
 	}
 	return 1;
@@ -675,15 +747,10 @@ static int nk_float_appox(float lhs, float rhs, float epsilon)
 
 static nk_rect_edge_type nk_rect_exact_shared_edge(struct nk_rect lhs, struct nk_rect rhs)
 {
-	// rhs.x == left
-	// lhs.x == left
-	// lhs.y == top
-	// rhs.y == top
-
-	const float lhs_right = lhs.x + lhs.w;
-	const float lhs_bottom = lhs.y + lhs.h;
-	const float rhs_right = rhs.x + rhs.w;
-	const float rhs_bottom = rhs.y + rhs.h;
+	const float lhs_right = nk_rect_right(lhs);
+	const float lhs_bottom = nk_rect_bottom(lhs);
+	const float rhs_right = nk_rect_right(rhs);
+	const float rhs_bottom = nk_rect_bottom(rhs);
 
 	const float close_enough = 1e-5f;
 
@@ -710,11 +777,11 @@ static nk_rect_edge_type nk_rect_exact_shared_edge(struct nk_rect lhs, struct nk
 
 struct nk_rect nk_rect_extend(struct nk_rect lhs, struct nk_rect rhs)
 {
-	struct nk_vec2 lhs_min = nk_vec2(lhs.x, lhs.y);
-	struct nk_vec2 lhs_max = nk_vec2(lhs_min.x + lhs.w, lhs_min.y + lhs.h);
+	struct nk_vec2 lhs_min = nk_rect_min(lhs);
+	struct nk_vec2 lhs_max = nk_rect_max(lhs);
 
-	struct nk_vec2 rhs_min = nk_vec2(rhs.x, rhs.y);
-	struct nk_vec2 rhs_max = nk_vec2(rhs_min.x + rhs.w, rhs_min.y + rhs.h);
+	struct nk_vec2 rhs_min = nk_rect_min(rhs);
+	struct nk_vec2 rhs_max = nk_rect_max(rhs);
 
 	struct nk_vec2 max = nk_vec2(fmaxf(lhs_max.x, rhs_max.x), fmaxf(lhs_max.y, rhs_max.y));
 
@@ -758,7 +825,7 @@ void nk_dock_resize(pillow_nk_sdl_t *pillow_ctx, struct nk_rect bounds)
 			nk_rect_side_right = 3,
 		} nk_rect_side_type_t;
 
-		typedef struct
+		typedef struct nk_neighbor_t
 		{
 			nk_dock_window_t *window;
 		} nk_neighbor_t;
@@ -776,25 +843,23 @@ void nk_dock_resize(pillow_nk_sdl_t *pillow_ctx, struct nk_rect bounds)
 			const struct nk_rect other = entry->node.private_bounds;
 			const float eps = 2.0f;
 
-			int x_overlap = (bounds.x < other.x + other.w) && (bounds.x + bounds.w > other.x);
-			if (x_overlap) {
-				if (nk_float_appox(bounds.y, other.y + other.h, eps)) {
+			if (nk_rect_left(bounds) < nk_rect_right(other) && nk_rect_right(bounds) > nk_rect_left(other)) {
+				if (nk_float_appox(nk_rect_top(bounds), nk_rect_bottom(other), eps)) {
 					neighbors_per_side[nk_rect_side_top][neighbour_counts[nk_rect_side_top]] = (nk_neighbor_t){entry};
 					neighbour_counts[nk_rect_side_top] = neighbour_counts[nk_rect_side_top] + 1;
 				}
-				else if (nk_float_appox(bounds.y + bounds.h, other.y, eps)) {
+				else if (nk_float_appox(nk_rect_bottom(bounds), nk_rect_top(other), eps)) {
 					neighbors_per_side[nk_rect_side_bottom][neighbour_counts[nk_rect_side_bottom]] = (nk_neighbor_t){entry};
 					neighbour_counts[nk_rect_side_bottom] = neighbour_counts[nk_rect_side_bottom] + 1;
 				}
 			}
 
-			int y_overlap = (bounds.y < other.y + other.h) && (bounds.y + bounds.h > other.y);
-			if (y_overlap) {
-				if (nk_float_appox(bounds.x, other.x + other.w, eps)) {
+			if (nk_rect_top(bounds) < nk_rect_bottom(other) && nk_rect_bottom(bounds) > nk_rect_top(other)) {
+				if (nk_float_appox(nk_rect_left(bounds), nk_rect_right(other), eps)) {
 					neighbors_per_side[nk_rect_side_left][neighbour_counts[nk_rect_side_left]] = (nk_neighbor_t){entry};
 					neighbour_counts[nk_rect_side_left] = neighbour_counts[nk_rect_side_left] + 1;
 				}
-				else if (nk_float_appox(bounds.x + bounds.w, other.x, eps)) {
+				else if (nk_float_appox(nk_rect_right(bounds), nk_rect_left(other), eps)) {
 					neighbors_per_side[nk_rect_side_right][neighbour_counts[nk_rect_side_right]] = (nk_neighbor_t){entry};
 					neighbour_counts[nk_rect_side_right] = neighbour_counts[nk_rect_side_right] + 1;
 				}
@@ -995,6 +1060,52 @@ static void nk_dock_popup_rect_slice_test(struct nk_context *ctx)
 	}
 }
 
+int nk_dock_begin(struct nk_context *ctx)
+{
+	pillow_nk_sdl_t *pillow_ctx = pillow_nk(ctx);
+	nk_dock_empty_container_t *empties = &pillow_ctx->dock.empties;
+	char buffer[NK_WINDOW_MAX_NAME];
+	for (size_t index = 0; index < empties->count; index++) {
+		nk_dock_empty_t *empty = empties->entries + index;
+		snprintf(buffer, sizeof(buffer), "%s-%llu", "empty-", index);
+		if (nk_begin(ctx, buffer, empty->bounds, NK_WINDOW_NO_INPUT | NK_WINDOW_NO_SCROLLBAR | NK_WINDOW_BACKGROUND)) {
+			struct nk_command_buffer *canvas = nk_window_get_canvas(ctx);
+			nk_fill_rect(canvas, ctx->current->bounds, 1.0f, nk_rgb(255, 0, 255));
+			nk_end(ctx);
+		}
+	}
+}
+
+void nk_dock_end(struct nk_context *ctx)
+{
+	pillow_nk_sdl_t *pillow_ctx = pillow_nk(ctx);
+	nk_dock_windows_container_t *windows = &pillow_ctx->dock.windows;
+	if (windows->count == 0) {
+		return;
+	}
+
+	for (size_t index = 0; index < pillow_array_size(windows->entries); index++) {
+		if (nk_dock_windows_container_valid(windows, index)) {
+			nk_dock_window_t *entry = windows->entries + index;
+			struct nk_window *window = nk_window_find(ctx, entry->title);
+			if (!window) {
+				// Maybe garbage collect :D
+				continue;
+			}
+			int is_minimised = window->flags & NK_WINDOW_MINIMIZED;
+			int was_minimised = entry->was_minimised;
+			entry->was_minimised = is_minimised;
+			if (is_minimised && !was_minimised) {
+				struct nk_rect resize_bounds = window->bounds;
+				resize_bounds.h = resize_bounds.h - window->layout->header_height - window->layout->footer_height;
+				resize_bounds.y = resize_bounds.y + window->layout->header_height + window->layout->footer_height;
+				nk_dock_empty_container_push(&pillow_ctx->dock.empties, &resize_bounds);
+				return;
+			}
+		}
+	}
+}
+
 int nk_dock_popup(struct nk_context *ctx, float x, float y, float w, float h)
 {
 	struct nk_window *target = ctx->current;
@@ -1008,9 +1119,13 @@ int nk_dock_popup(struct nk_context *ctx, float x, float y, float w, float h)
 
 	// TODO: Let's see if we can change the active check to a if(ctx->active) { /* Do stuff */} thing
 	{
-		struct nk_rect popup_rect = nk_rect(0, 0, ctx->current->bounds.w, ctx->current->bounds.h);
+		struct nk_rect popup_rect = nk_rect(-ctx->current->layout->clip.x, -ctx->current->layout->clip.y, ctx->current->bounds.w, ctx->current->bounds.h);
+		popup_rect.x = popup_rect.x + ctx->current->bounds.x;
+		popup_rect.y = popup_rect.y + ctx->current->bounds.y;
 
 		if (nk_input_is_key_down(&ctx->input, NK_KEY_CTRL)) {
+			nk_style_push_float(ctx, &ctx->style.window.popup_padding.x, 0.0f);
+			nk_style_push_float(ctx, &ctx->style.window.popup_padding.y, 0.0f);
 			if (nk_popup_begin(ctx, NK_POPUP_DYNAMIC, "DOCK-POPUP", NK_WINDOW_PASSTHROUGH | NK_WINDOW_NO_SCROLLBAR, popup_rect)) {
 				const size_t found = nk_dock_windows_container_find(&pillow_ctx->dock.windows, target);
 				if (found) {
@@ -1025,8 +1140,9 @@ int nk_dock_popup(struct nk_context *ctx, float x, float y, float w, float h)
 					nk_layout_row_dynamic(ctx, 36.0f, 1);
 					nk_labelf(ctx, NK_TEXT_CENTERED, "max-x=%f max-y=%f", rect.x + rect.w, rect.y + rect.h);
 				}
-
 				nk_popup_end(ctx);
+				nk_style_pop_float(ctx);
+				nk_style_pop_float(ctx);
 			}
 		}
 	}
@@ -1058,6 +1174,8 @@ int nk_dock_popup(struct nk_context *ctx, float x, float y, float w, float h)
 
 					struct nk_rect popup_rect = nk_rect(x, y, w, h);
 
+					nk_style_push_float(ctx, &ctx->style.window.popup_padding.x, 0.0f);
+					nk_style_push_float(ctx, &ctx->style.window.popup_padding.y, 0.0f);
 					if (nk_popup_begin(ctx, NK_POPUP_DYNAMIC, "DOCK-POPUP", NK_WINDOW_PASSTHROUGH | NK_WINDOW_NO_SCROLLBAR, popup_rect)) {
 						nk_dock_buttons_mask_t mask = {0};
 						mask.values[2][2] = 0xFF;
@@ -1086,6 +1204,8 @@ int nk_dock_popup(struct nk_context *ctx, float x, float y, float w, float h)
 						}
 						nk_popup_end(ctx);
 					}
+					nk_style_pop_float(ctx);
+					nk_style_pop_float(ctx);
 				}
 			}
 		}
@@ -1106,7 +1226,7 @@ int nk_dock_popup(struct nk_context *ctx, float x, float y, float w, float h)
 				prev = control;
 			}
 
-			if (prev->x == target->bounds.x && prev->y == target->bounds.y && prev->w == target->bounds.w && prev->h == target->bounds.h) {
+			if (nk_rect_equals(*prev, target->bounds)) {
 				// Keep scaling deactivated at all costs
 				target->layout->flags = target->layout->flags & ~NK_WINDOW_SCALABLE;
 				return 1;
@@ -1116,8 +1236,6 @@ int nk_dock_popup(struct nk_context *ctx, float x, float y, float w, float h)
 			if (target->flags & NK_WINDOW_SCALABLE) {
 				target->layout->flags = target->layout->flags | NK_WINDOW_SCALABLE;
 			}
-
-			// TODO: When we undock, we need to resize!
 
 			// Undock
 			struct nk_rect resize_bounds = entry->node.private_bounds;

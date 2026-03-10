@@ -19,6 +19,8 @@ struct nk_context *nk(struct pillow_nk_sdl_t *nk_sdl);
 struct pillow_nk_sdl_t *nk_sdl_allocate(struct pillow_allocator *allocator, struct SDL_Renderer *renderer);
 void nk_sdl_free(struct pillow_allocator *allocator, struct pillow_nk_sdl_t *nk);
 
+int nk_dock_begin(struct nk_context* ctx);
+void nk_dock_end(struct nk_context* ctx);
 int nk_dock_popup(struct nk_context *ctx, float x, float y, float w, float h);
 
 // Extensions - Only works with pillow_nk_sdl_t
