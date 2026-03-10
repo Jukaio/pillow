@@ -19,8 +19,8 @@ typedef struct pillow_executable_state_t {
 }pillow_executable_state_t;
 
 typedef struct pillow_executable_interface {
-	pillow_executable_state_t* (*reload)(struct pillow_allocator* allocator, struct pillow_registry_api* registry, pillow_executable_state_t* previous);
-	void (*shutdown)(struct pillow_allocator* allocator, struct pillow_registry_api* registry, pillow_executable_state_t* current);
+	pillow_executable_state_t* (*start)(struct pillow_allocator* allocator, struct pillow_registry_api* registry);
+	void (*shutdown)(struct pillow_registry_api* registry, pillow_executable_state_t* current);
 
 	pillow_exectuable_status_t(*execute)(pillow_executable_state_t* state);
 }pillow_executable_interface;

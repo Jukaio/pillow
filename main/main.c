@@ -33,7 +33,7 @@ int main(int argc, char** argv)
 	// If static, else load...
 	pillow_registry_api* registry = api_pillow_registry;
 
-	pillow_executable_state_t* state = pillow_case_executable->reload(pillow_heap, registry, NULL);
+	pillow_executable_state_t* state = pillow_case_executable->start(pillow_heap, registry);
 
 	for (;;) {
 		pillow_exectuable_status_t status = pillow_case_executable->execute(state);
@@ -42,7 +42,7 @@ int main(int argc, char** argv)
 		}
 	}
 
-	pillow_case_executable->shutdown(pillow_heap, registry, state);
+	pillow_case_executable->shutdown(registry, state);
 
 	return 0;
 }
